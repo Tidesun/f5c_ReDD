@@ -15,6 +15,7 @@
 #include <highfive/H5File.hpp>
 
 #include "f5cmisc.h"
+#include "redd_io.h"
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -531,17 +532,18 @@ db_t* init_db(core_t* core) {
         // db->event_alignment_result_str = (char **)malloc(sizeof(char *) * db->capacity_bam_rec);
         // MALLOC_CHK(db->event_alignment_result_str);
         
-        db->redd_data_point_vec = (std::vector<std::vector<ReDDDataPoint>> **)malloc(sizeof(std::vector<std::vector<ReDDDataPoint>> *) * db->capacity_bam_rec);
+        db->redd_data_point_vec = (std::vector<std::vector<redd_data_point_t>> **)malloc(sizeof(std::vector<std::vector<redd_data_point_t>> *) * db->capacity_bam_rec);
         MALLOC_CHK(db->redd_data_point_vec);
 
         for (i = 0; i < db->capacity_bam_rec; ++i) {
-            db->redd_data_point_vec[i] = new std::vector<std::vector<ReDDDataPoint>>;
+            db->redd_data_point_vec[i] = new std::vector<std::vector<redd_data_point_t>>;
             NULL_CHK(db->redd_data_point_vec[i]);
             db->event_alignment_result[i] = new std::vector<event_alignment_t> ;
             NULL_CHK(db->event_alignment_result[i]);
             (db->eventalign_summary[i]).num_events=0; //done here in the same loop for efficiency
             // db->event_alignment_result_str[i] = NULL;
         }
+
 
 
     }
@@ -886,9 +888,9 @@ void eventalign_single(core_t* core, db_t* db, int32_t i){
     } else if (redd_output){
         // std::string dummy_str= "\n";
         *db->redd_data_point_vec[i] = emit_event_alignment_tsv_redd(0,&(db->et[i]),core->model,core->kmer_size, db->scalings[i],*event_alignment_result, print_read_names, scale_events, write_samples, write_signal_index, collapse_events,
-                   db->read_idx[i], qname, contig, db->sig[i]->sample_rate, db->sig[i]->rawptr,db->sig[i]->nsample);
+                   db->read_idx[i], qname, contig, db->sig[i]->sample_rate, db->sig[i]->rawptr,db->sig[i]->nsample,core->opt.redd_window_size,core->redd_candidate_ratio_map);
         // fprintf(stderr, "%d\n", db->redd_num_data_points[i]);
-        // db->redd_data_point_vec[i] = new std::vector<ReDDDataPoint>;
+        // db->redd_data_point_vec[i] = new std::vector<redd_data_point_t>;
         // db->redd_data_point_vec[i] = read_data_point_vec.data();
 
         // fprintf(stderr, "%.3f\n", db->redd_data_point_vec[i][0][0].X[0]);
@@ -1049,7 +1051,12 @@ void output_db(core_t* core, db_t* db) {
     std::vector<std::vector<std::vector<float>>> X_arr;
     std::vector<std::vector<uint32_t>> y_ref_arr;
     std::vector<std::vector<uint32_t>> y_call_arr;
-    std::vector<float> ratio_arr;
+    
+    std::vector<std::vector<std::vector<float>>> X_candidate_arr;
+    std::vector<std::vector<uint32_t>> y_ref_candidate_arr;
+    std::vector<std::vector<uint32_t>> y_call_candidate_arr;
+    std::vector<float> ratio_candidate_arr;
+
     int32_t i = 0;
     for (i = 0; i < db->n_bam_rec; i++){
         if(!db->read_stat_flag[i]){
@@ -1096,18 +1103,33 @@ void output_db(core_t* core, db_t* db) {
                     fprintf(summary_fp, "%d\t%d\t%d\t%d\t", summary.num_events, summary.num_steps, summary.num_skips, summary.num_stays);
                     fprintf(summary_fp, "%.2lf\t%.3lf\t%.3lf\t%.3lf\t%.3lf\n", summary.sum_duration/(db->sig[i]->sample_rate), scalings.shift, scalings.scale, 0.0, scalings.var);
                 }
-                std::vector<std::vector<ReDDDataPoint>> read_data_points_vec = *(db->redd_data_point_vec[i]);
+                std::vector<std::vector<redd_data_point_t>> read_data_points_vec = *(db->redd_data_point_vec[i]);
+
                 for (size_t j =0;j<read_data_points_vec.size();j++){
-                    X_arr.push_back(std::vector<std::vector<float>>());
-                    y_ref_arr.push_back(std::vector<uint32_t>());
-                    y_call_arr.push_back(std::vector<uint32_t>());
-                    ratio_arr.push_back(-1.0);
-                    for (ReDDDataPoint &data_point:read_data_points_vec[j]){
+                    if (read_data_points_vec[j][0].ratio != -1){
+                        X_candidate_arr.push_back(std::vector<std::vector<float>>());
+                        y_ref_candidate_arr.push_back(std::vector<uint32_t>());
+                        y_call_candidate_arr.push_back(std::vector<uint32_t>());
+                        ratio_candidate_arr.push_back(read_data_points_vec[j][0].ratio);
+                        for (redd_data_point_t &data_point:read_data_points_vec[j]){
+                            X_candidate_arr.back().push_back(data_point.X);
+                            y_ref_candidate_arr.back().push_back(data_point.y_ref);
+                            y_call_candidate_arr.back().push_back(data_point.y_call);
+                        }
+                    } else {
+                        X_arr.push_back(std::vector<std::vector<float>>());
+                        y_ref_arr.push_back(std::vector<uint32_t>());
+                        y_call_arr.push_back(std::vector<uint32_t>());
+                        for (redd_data_point_t &data_point:read_data_points_vec[j]){
                             X_arr.back().push_back(data_point.X);
                             y_ref_arr.back().push_back(data_point.y_ref);
                             y_call_arr.back().push_back(data_point.y_call);
                         }
+
+                    }
+                   
                 }
+
 
                 // char *event_alignment_result_str = db->event_alignment_result_str[i];
                 // fputs(event_alignment_result_str,stdout);
@@ -1129,24 +1151,12 @@ void output_db(core_t* core, db_t* db) {
             }
         }
     }
-
-    HighFive::File hdf5_output(core->hdf5_output_file, HighFive::File::ReadWrite);
-    auto ratio_dataset = hdf5_output.getDataSet("ratio");
-    auto X_dataset = hdf5_output.getDataSet("X");
-    auto y_ref_dataset = hdf5_output.getDataSet("y_ref");
-    auto y_call_dataset = hdf5_output.getDataSet("y_call");
-    size_t existing_shape = X_dataset.getDimensions()[0];
-    X_dataset.resize({existing_shape + X_arr.size(), 9,5});
-    X_dataset.select({existing_shape, 0,0}, {X_arr.size(), 9, 5}).write(X_arr);
-    existing_shape = y_ref_dataset.getDimensions()[0];
-    y_ref_dataset.resize({ existing_shape + y_ref_arr.size(), 9});
-    y_ref_dataset.select({existing_shape, 0}, {y_ref_arr.size(), 9}).write(y_ref_arr);
-    existing_shape = y_call_dataset.getDimensions()[0];
-    y_call_dataset.resize({existing_shape + y_call_arr.size(), 9});
-    y_call_dataset.select({existing_shape, 0}, {y_call_arr.size(), 9}).write(y_call_arr);
-    existing_shape = ratio_dataset.getDimensions()[0];
-    ratio_dataset.resize({existing_shape + ratio_arr.size()});
-    ratio_dataset.select({existing_shape}, {ratio_arr.size()}).write(ratio_arr);
+    if (core->opt.redd_candidate_file == NULL){
+        append_arr_to_dataset(core,core->hdf5_output_file_prefix+".hdf5",X_arr,y_ref_arr,y_call_arr, std::vector<float>());
+    } else {
+        append_arr_to_dataset(core,core->hdf5_output_file_prefix+".candidate.hdf5",X_candidate_arr,y_ref_candidate_arr,y_call_candidate_arr,ratio_candidate_arr);
+        append_arr_to_dataset(core,core->hdf5_output_file_prefix+".noncandidate.hdf5",X_arr,y_ref_arr,y_call_arr, std::vector<float>());
+    }
 
     fflush(stdout);
 
@@ -1180,7 +1190,7 @@ void free_db_tmp(db_t* db) {
         }
         if(db->redd_data_point_vec){ //eventalign related
             delete db->redd_data_point_vec[i];
-            db->redd_data_point_vec[i]=new std::vector<std::vector<ReDDDataPoint>> ;
+            db->redd_data_point_vec[i]=new std::vector<std::vector<redd_data_point_t>> ;
         }
         // if(db->event_alignment_result_str){ //eventalign related
         //     free(db->event_alignment_result_str[i]);
@@ -1269,4 +1279,6 @@ void init_opt(opt_t* opt) {
     opt->cuda_max_readlen=3.0f;
     opt->cuda_avg_events_per_kmer=2.0f; //only if CUDA_DYNAMIC_MALLOC is unset
     opt->cuda_max_avg_events_per_kmer=5.0f;
+    opt->redd_window_size=9;
+    opt->redd_candidate_file=NULL;
 }

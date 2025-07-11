@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <unordered_map>
 
 
 #include "f5c.h"
@@ -2294,7 +2295,7 @@ static inline uint32_t get_encoding(char base) {
     }
 }
 typedef struct {
-    size_t ref_pos;
+    u_int64_t ref_pos;
     char ref_base;
     char read_base;
     size_t event_idx_start;
@@ -2304,16 +2305,15 @@ typedef struct {
     float skewness;
     float kurtosis;
     size_t length;
-} ReDDFeature;
-std::vector<std::vector<ReDDDataPoint>> emit_event_alignment_tsv_redd(uint32_t strand_idx,
+} redd_feature_t;
+std::vector<std::vector<redd_data_point_t>> emit_event_alignment_tsv_redd(uint32_t strand_idx,
                               const event_table* et, model_t* model, uint32_t kmer_size, scalings_t scalings,
                               const std::vector<event_alignment_t>& alignments,
                               int8_t print_read_names, int8_t scale_events, int8_t write_samples, int8_t write_signal_index, int8_t collapse,
-                              int64_t read_index, char* read_name, char *ref_name,float sample_rate, float *rawptr,int64_t len_raw_signal)
+                              int64_t read_index, char* read_name, char *ref_name,float sample_rate, float *rawptr,int64_t len_raw_signal,int64_t redd_window_size,std::unordered_map<std::string, std::unordered_map<u_int64_t, float>> redd_candidate_ratio_map)
 {
-    std::vector<std::vector<ReDDDataPoint>> read_data_point_vec;
-    const size_t half_redd_window_size = 4;
-    const size_t redd_window_size = half_redd_window_size * 2 + 1;
+    std::vector<std::vector<redd_data_point_t>> read_data_point_vec;
+    int64_t half_redd_window_size = redd_window_size/2;
     float raw_signal_median = get_median_pa(rawptr,len_raw_signal);
     float raw_signal_mad = get_median_mad_pa(rawptr,len_raw_signal);
 
@@ -2322,7 +2322,7 @@ std::vector<std::vector<ReDDDataPoint>> emit_event_alignment_tsv_redd(uint32_t s
     // str_init(sp, sizeof(char)*alignments.size()*120);
 
     size_t n_collapse = 1;
-    std::vector<ReDDFeature> redd_feature_vec;
+    std::vector<redd_feature_t> redd_feature_vec;
     size_t event_idx_start = -1;
     size_t event_idx_end = -1;
     for(size_t i = 0; i < alignments.size(); i+=n_collapse) {
@@ -2376,7 +2376,7 @@ std::vector<std::vector<ReDDDataPoint>> emit_event_alignment_tsv_redd(uint32_t s
         float kurtosis = 0.0;
         size_t length = 0;
         get_raw_signals_feature(samples,mean, length,stdev, skewness, kurtosis);
-        ReDDFeature redd_feature;
+        redd_feature_t redd_feature;
         if (!ea.rc){
             redd_feature = {ea.ref_position,ea.ref_kmer[0],ea.model_kmer[0],event_idx_start,event_idx_end,mean,stdev,skewness,kurtosis,length};
         } else {
@@ -2387,7 +2387,7 @@ std::vector<std::vector<ReDDDataPoint>> emit_event_alignment_tsv_redd(uint32_t s
         
         if (!redd_feature_vec.empty()){
             // check whether consecutive with previous event
-            ReDDFeature prev_base_redd_feature = redd_feature_vec.back();
+            redd_feature_t prev_base_redd_feature = redd_feature_vec.back();
             if ((prev_base_redd_feature.event_idx_end + 1  != redd_feature.event_idx_start && !ea.rc) && (prev_base_redd_feature.event_idx_end - 1  != redd_feature.event_idx_start && ea.rc)){
                 redd_feature_vec.clear();
             }     
@@ -2396,10 +2396,19 @@ std::vector<std::vector<ReDDDataPoint>> emit_event_alignment_tsv_redd(uint32_t s
 
         if (redd_feature_vec.size() >= redd_window_size){
             if (redd_feature_vec[redd_feature_vec.size()-1-half_redd_window_size].ref_base == 'A'){
-                std::vector<ReDDDataPoint> data_point_vec;
+                redd_feature_t center_feature = redd_feature_vec[redd_feature_vec.size()-1-half_redd_window_size];
+                std::vector<redd_data_point_t> data_point_vec;
+                float ratio = -1.0;
+                if (!redd_candidate_ratio_map.empty()){
+                    if (redd_candidate_ratio_map.find(ref_name) != redd_candidate_ratio_map.end()){
+                        if (redd_candidate_ratio_map[ref_name].find(center_feature.ref_pos) != redd_candidate_ratio_map[ref_name].end()){
+                            ratio = redd_candidate_ratio_map[ref_name][center_feature.ref_pos];
+                        }
+                    }
+                }
                 for (int feature_index = redd_feature_vec.size() - redd_window_size; feature_index < redd_feature_vec.size();feature_index+=1 ){
-                    ReDDFeature feature = redd_feature_vec[feature_index];
-                    ReDDDataPoint data_point = {{feature.mean,feature.stdev,(float)feature.length,feature.skewness,feature.kurtosis},get_encoding(feature.ref_base),get_encoding(feature.read_base)};
+                    redd_feature_t feature = redd_feature_vec[feature_index];
+                    redd_data_point_t data_point = {{feature.mean,feature.stdev,(float)feature.length,feature.skewness,feature.kurtosis},get_encoding(feature.ref_base),get_encoding(feature.read_base),ratio};
                     data_point_vec.push_back(data_point);
                     // sprintf_append(sp, "%s\t%s\t%d\t%c\t%c\t%c\t%d\t%d\t",
                     // ref_name, //ea.ref_name.c_str(),

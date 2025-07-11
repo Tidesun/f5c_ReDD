@@ -15,9 +15,11 @@
 #include <htslib/hts.h>
 #include <htslib/sam.h>
 #include <slow5/slow5.h>
+
 #include "nanopolish_read_db.h"
 
 #include <string>
+#include <unordered_map>
 #include <vector> //required for eventalign
 
 #define F5C_VERSION "1.5"
@@ -113,6 +115,8 @@ typedef struct {
     char *region_str; //the region string in format chr:start-end
     int8_t meth_out_version; //output tsv version for call-methylation
     int8_t sam_out_version; //output sam version for eventalign
+    int32_t redd_window_size; // ReDD window size
+    char* redd_candidate_file;
 
     int32_t min_num_events_to_rescale; // the minimum number of event for rescaling, 200 is the default
 
@@ -289,7 +293,8 @@ typedef struct {
     std::vector<float> X;
     uint32_t y_ref;
     uint32_t y_call; 
-} ReDDDataPoint;
+    float ratio;
+} redd_data_point_t;
 /* a batch of read data (dynamic data based on the reads) */
 typedef struct {
     // region string
@@ -351,7 +356,7 @@ typedef struct {
     //TODO : convert this to a C array and get rid of include <vector>
     std::vector<event_alignment_t> **event_alignment_result;
     char **event_alignment_result_str;
-    std::vector<std::vector<ReDDDataPoint>> **redd_data_point_vec; 
+    std::vector<std::vector<redd_data_point_t>> **redd_data_point_vec;     
 
 
 } db_t;
@@ -424,7 +429,8 @@ typedef struct {
     //slow5
     slow5_file_t *sf;
 
-    char *hdf5_output_file;
+    std::string hdf5_output_file_prefix;
+    std::unordered_map<std::string, std::unordered_map<u_int64_t, float>> redd_candidate_ratio_map;
 
 
     // models
