@@ -15,7 +15,6 @@
 #include <htslib/hts.h>
 #include <htslib/sam.h>
 #include <slow5/slow5.h>
-
 #include "nanopolish_read_db.h"
 
 #include <string>
@@ -58,6 +57,7 @@
 #define F5C_R10 0x40000 //r10
 #define F5C_PAF 0x80000 //paf (eventalign only)
 #define F5C_M6ANET 0x100000 //m6anet (eventalign only)
+#define F5C_REDD 0x200000 //m6anet (eventalign only)
 
 /*************************************************************
  * flags for a read status (related to db_t->read_stat_flag) *
@@ -285,7 +285,11 @@ typedef struct {
     float log_scaled_var;
 
 } signal_t;
-
+typedef struct {
+    std::vector<float> X;
+    uint32_t y_ref;
+    uint32_t y_call; 
+} ReDDDataPoint;
 /* a batch of read data (dynamic data based on the reads) */
 typedef struct {
     // region string
@@ -347,6 +351,7 @@ typedef struct {
     //TODO : convert this to a C array and get rid of include <vector>
     std::vector<event_alignment_t> **event_alignment_result;
     char **event_alignment_result_str;
+    std::vector<std::vector<ReDDDataPoint>> **redd_data_point_vec; 
 
 
 } db_t;
@@ -418,6 +423,9 @@ typedef struct {
 
     //slow5
     slow5_file_t *sf;
+
+    char *hdf5_output_file;
+
 
     // models
     model_t* model; //dna model

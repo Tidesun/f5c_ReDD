@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include "logsum.h"
-
+#include <highfive/H5File.hpp>
 /* Input/processing/output interleave framework :
 unless IO_PROC_NO_INTERLEAVE is set input, processing and output are interleaved
 main thread
@@ -106,6 +106,7 @@ static struct option long_options[] = {
     {"paf",no_argument,0,'c'},                     //47 if print in paf format (only for eventalign)
     {"sam-out-version",required_argument,0,0},     //48 specify the version of the sam output for eventalign (eventalign only)
     {"m6anet",no_argument,0,0},                    //49 m6anet output (eventalign only)
+    {"redd",no_argument,0,0},                    //50 ReDD output (eventalign only)
     {0, 0, 0, 0}};
 
 
@@ -220,6 +221,7 @@ int meth_main(int argc, char* argv[], int8_t mode) {
     char* profilename = NULL; //Create variable to store profile arg
     char *eventalignsummary = NULL;
     char *slow5file = NULL;
+    char *outputfile = NULL;
 
     int8_t is_ultra_thresh_set = 0;
     int8_t is_meth_out_version_set = 0;
@@ -340,6 +342,7 @@ int meth_main(int argc, char* argv[], int8_t mode) {
             yes_or_no(&opt, F5C_RD_RAW_DUMP, longindex, optarg, 1);
         } else if(c=='o'){
 			if (strcmp(optarg, "-") != 0) {
+                outputfile = optarg;
 				if (freopen(optarg, "wb", stdout) == NULL) {
 					ERROR("failed to write the output to file %s : %s",optarg, strerror(errno));
 					exit(EXIT_FAILURE);
@@ -454,6 +457,12 @@ int meth_main(int argc, char* argv[], int8_t mode) {
                 exit(EXIT_FAILURE);
             }
             yes_or_no(&opt, F5C_M6ANET, longindex, "yes", 1);
+        } else if (c == 0 && longindex == 50){ //m6anet output
+            if(mode!=1){
+                ERROR("%s","Option --redd is available only in eventalign");
+                exit(EXIT_FAILURE);
+            }
+            yes_or_no(&opt, F5C_REDD, longindex, "yes", 1);
         }
     }
 
@@ -521,6 +530,7 @@ int meth_main(int argc, char* argv[], int8_t mode) {
         fprintf(fp_help,"   --sam                      write output in SAM format\n");
         fprintf(fp_help,"   --sam-out-version INT      sam output version (set 1 to revert to old nanopolish style format) [%d]\n",opt.meth_out_version);
         fprintf(fp_help,"   --m6anet                   write output in m6anet format\n");
+        fprintf(fp_help,"   --redd                   write output in redd format\n");
 
         fprintf(fp_help,"   --print-read-names         print read names instead of indexes\n");
         fprintf(fp_help,"   --scale-events             scale events to the model, rather than vice-versa\n");
@@ -553,7 +563,6 @@ int meth_main(int argc, char* argv[], int8_t mode) {
 
     //initialise the core data structure
     core_t* core = init_core(bamfilename, fastafile, fastqfile, tmpfile, opt,realtime0,mode,eventalignsummary, slow5file);
-
     #ifdef ESL_LOG_SUM
         p7_FLogsumInit();
     #endif
@@ -582,6 +591,7 @@ int meth_main(int argc, char* argv[], int8_t mode) {
         int8_t sam_output =  (core->opt.flag & F5C_SAM) ? 1 : 0 ;
         int8_t paf_output =  (core->opt.flag & F5C_PAF) ? 1 : 0 ;
         int8_t m6anet_output =  (core->opt.flag & F5C_M6ANET) ? 1 : 0 ;
+        int8_t redd_output =  (core->opt.flag & F5C_REDD) ? 1 : 0 ;
 
         if(sam_output && paf_output){
             ERROR("%s","-c and --sam cannot be used together");
@@ -602,6 +612,47 @@ int meth_main(int argc, char* argv[], int8_t mode) {
             //none
         } else if (m6anet_output){
             emit_event_alignment_tsv_m6anet_header(stdout, print_read_names, write_signal_index);
+        } else if (redd_output){
+            HighFive::File file(outputfile, HighFive::File::ReadWrite | HighFive::File::Create);
+            core->hdf5_output_file = outputfile;
+            HighFive::DataSetCreateProps X_props;
+            X_props.add(HighFive::Chunking({10240,9,5}));
+            HighFive::DataSetCreateProps y_props;
+            y_props.add(HighFive::Chunking({10240,9}));
+            HighFive::DataSetCreateProps ratio_props;
+            ratio_props.add(HighFive::Chunking({10240}));
+            // Create a dataset with an unlimited dimension for appending
+            file.createDataSet<float>(
+                "/X",
+                HighFive::DataSpace({0,9,5}, {HighFive::DataSpace::UNLIMITED,9,5}), // Initial size 10, unlimited max
+                X_props // Chunking required for extendable datasets
+            );
+            file.createDataSet<uint32_t>(
+                "/y_ref",
+                HighFive::DataSpace({0,9}, {HighFive::DataSpace::UNLIMITED,9}), // Initial size 10, unlimited max
+                y_props // Chunking required for extendable datasets
+            );
+            file.createDataSet<uint32_t>(
+                "/y_call",
+                HighFive::DataSpace({0,9}, {HighFive::DataSpace::UNLIMITED,9}), // Initial size 10, unlimited max
+                y_props // Chunking required for extendable datasets
+            );
+            file.createDataSet<float>(
+                "/ratio",
+                HighFive::DataSpace({0}, {HighFive::DataSpace::UNLIMITED}), // Initial size 10, unlimited max
+                ratio_props // Chunking required for extendable datasets
+            );
+            // HighFive::DataSet y_ref_dataset = file.createDataSet<uint32_t>(
+            //     "/y_ref",
+            //     HighFive::DataSpace({10240,9}, {HighFive::DataSpace::UNLIMITED,9}), // Initial size 10, unlimited max
+            //     HighFive::Chunking({10240,9}) // Chunking required for extendable datasets
+            // );
+            // HighFive::DataSet y_call_dataset = file.createDataSet<uint32_t>(
+            //     "/y_call",
+            //     HighFive::DataSpace({10240,9}, {HighFive::DataSpace::UNLIMITED,9}), // Initial size 10, unlimited max
+            //     HighFive::Chunking({10240,9}) // Chunking required for extendable datasets
+            // );
+            // emit_event_alignment_tsv_header(stdout, print_read_names, write_samples, write_signal_index);
         } else{
             emit_event_alignment_tsv_header(stdout, print_read_names, write_samples, write_signal_index);
         }

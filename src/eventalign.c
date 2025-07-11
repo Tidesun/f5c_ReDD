@@ -20,9 +20,16 @@
 #include <iostream>
 #include <iterator>
 
+#include <cmath>
+#include <cstddef>
+#include <limits>
+
+
 #include "f5c.h"
 #include "f5cmisc.h"
 #include "str.h"
+// #include "f5c_redd_hdf5_io.h"
+
 
 /*
 Code is adapted from Nanopolish eventalign module
@@ -2022,6 +2029,102 @@ std::vector<float> get_scaled_samples(float *samples, uint64_t start_idx, uint64
     }
     return out;
 }
+// Helper function to compute median for a float array
+float get_median_pa(float* arr, int64_t size) {
+    // Create a copy to avoid modifying the original array
+    float* temp = new float[size];
+    memcpy(temp, arr, size * sizeof(float));
+    std::sort(temp, temp + size);
+
+    float med;
+    if (size % 2 == 0)
+        med = (temp[size/2 - 1] + temp[size/2]) / 2.0f;
+    else
+        med = temp[size/2];
+
+    delete[] temp;
+    return med;
+}
+// Compute MAD for a raw array of floats
+float get_median_mad_pa(float* arr, int64_t size) {
+    float med = get_median_pa(arr, size);
+    // Compute absolute deviations
+    float* deviations = new float[size];
+    for (size_t i = 0; i < size; ++i)
+        deviations[i] = std::fabs(arr[i] - med);
+
+    float mad_value = get_median_pa(deviations, size);
+    delete[] deviations;
+    return mad_value;
+}
+std::vector<float> get_scaled_samples_redd(float *samples, uint64_t start_idx, uint64_t end_idx, scalings_t scaling,float raw_signal_median,float raw_signal_mad){
+    std::vector<float> out;
+    for(uint64_t i = start_idx; i < end_idx; ++i) {
+        double s = samples[i];
+        double scaled_s = s - scaling.shift;
+        scaled_s /= scaling.scale;
+        scaled_s -= raw_signal_median;
+        scaled_s /= raw_signal_mad;
+        if (scaled_s < -5.0){
+            scaled_s = -5.0;
+        }
+        if (scaled_s > 5.0){
+            scaled_s = 5.0;
+        }
+        out.push_back(scaled_s);
+    }
+    return out;
+}
+
+
+// Compute stat
+void get_raw_signals_feature(const std::vector<float>& data,float& mean, size_t& length,
+    float& stdev, float& skewness, float& kurtosis) {
+    length = data.size();
+    if (length == 0) {
+        mean = stdev = skewness = kurtosis = std::numeric_limits<float>::quiet_NaN();
+        return;
+    }
+    // Step 1: Compute mean
+    double sum = 0.0;
+    for(size_t i = 0; i < length; ++i)
+        sum += data[i];
+    mean = static_cast<float>(sum / length);
+
+    // Step 2: Central moments
+    double m2 = 0.0, m3 = 0.0, m4 = 0.0;
+    for(size_t i = 0; i < length; ++i) {
+        double diff = data[i] - mean;
+        m2 += diff * diff;
+        m3 += diff * diff * diff;
+        m4 += diff * diff * diff * diff;
+    }
+
+    // Variance with Bessel's correction
+    double var = (length > 1) ? m2 / (length - 1) : 0.0;
+    stdev = static_cast<float>(std::sqrt(var));
+
+    // Standardized moments (sample estimators)
+    if(length > 2 && stdev > 0) {
+        skewness = static_cast<float>(
+            (length * m3) / ((length - 1) * (length - 2) * std::pow(stdev, 3))
+        );
+    } else {
+        skewness = std::numeric_limits<float>::quiet_NaN();
+    }
+
+    if(length > 3 && stdev > 0) {
+        double n = (double)length;
+        double denom = (n - 1) * (n - 2) * (n - 3);
+        double g2 = (n * (n + 1) * m4 - 3 * m2 * m2 * (n - 1))
+                    / (denom * std::pow(stdev, 4));
+        kurtosis = static_cast<float>(g2);
+    } else {
+        kurtosis = std::numeric_limits<float>::quiet_NaN();
+    }
+
+}
+
 
 std::vector<float> get_scaled_samples_for_event(const event_table* events,scalings_t scaling, uint32_t event_idx, float *samples)
 {
@@ -2173,6 +2276,175 @@ char *emit_event_alignment_tsv(uint32_t strand_idx,
 
     //str_free(sp); //freeing is later done in free_db_tmp()
     return sp->s;
+}
+static inline uint32_t get_encoding(char base) {
+    if (base == 'A') { 
+        return 1;
+    } else if (base == 'C') {
+        return 2;
+    } else if (base == 'G') {
+        return 3;
+    } else if (base == 'T') {
+        return 4;
+    } else if (base == 'N') {
+        return 0;
+    } else {
+        WARNING("A None ACGTN base found : %c", base);
+        return 0;
+    }
+}
+typedef struct {
+    size_t ref_pos;
+    char ref_base;
+    char read_base;
+    size_t event_idx_start;
+    size_t event_idx_end;
+    float mean;
+    float stdev;
+    float skewness;
+    float kurtosis;
+    size_t length;
+} ReDDFeature;
+std::vector<std::vector<ReDDDataPoint>> emit_event_alignment_tsv_redd(uint32_t strand_idx,
+                              const event_table* et, model_t* model, uint32_t kmer_size, scalings_t scalings,
+                              const std::vector<event_alignment_t>& alignments,
+                              int8_t print_read_names, int8_t scale_events, int8_t write_samples, int8_t write_signal_index, int8_t collapse,
+                              int64_t read_index, char* read_name, char *ref_name,float sample_rate, float *rawptr,int64_t len_raw_signal)
+{
+    std::vector<std::vector<ReDDDataPoint>> read_data_point_vec;
+    const size_t half_redd_window_size = 4;
+    const size_t redd_window_size = half_redd_window_size * 2 + 1;
+    float raw_signal_median = get_median_pa(rawptr,len_raw_signal);
+    float raw_signal_mad = get_median_mad_pa(rawptr,len_raw_signal);
+
+    // kstring_t str;
+    // kstring_t *sp = &str;
+    // str_init(sp, sizeof(char)*alignments.size()*120);
+
+    size_t n_collapse = 1;
+    std::vector<ReDDFeature> redd_feature_vec;
+    size_t event_idx_start = -1;
+    size_t event_idx_end = -1;
+    for(size_t i = 0; i < alignments.size(); i+=n_collapse) {
+    
+        const event_alignment_t& ea = alignments[i];
+        event_idx_start = ea.event_idx;
+        event_idx_end = ea.event_idx;
+        char strand = ea.rc ? '-' : '+';
+        // basic information
+        // if (!print_read_names)
+        // {
+        //     sprintf_append(sp, "%s\t%d\t%s\t%ld\t%c\t",
+        //             ref_name, //ea.ref_name.c_str(),
+        //             ea.ref_position,
+        //             ea.ref_kmer,
+        //             (long)read_index,
+        //             strand); //"tc"[ea.strand_idx]);
+        // }
+        // else
+        // {
+        //     sprintf_append(sp, "%s\t%d\t%s\t%s\t%c\t",
+        //             ref_name, //ea.ref_name.c_str(),
+        //             ea.ref_position,
+        //             ea.ref_kmer,
+        //             read_name, //sr.read_name.c_str(),
+        //             strand); //"tc"[ea.strand_idx]);
+        // }
+
+        uint64_t start_idx = (et->event)[ea.event_idx].start; //inclusive
+        uint64_t end_idx = (et->event)[ea.event_idx].start + (uint64_t)((et->event)[ea.event_idx].length); //non-inclusive
+
+        std::vector<float> samples = get_scaled_samples_redd(rawptr, start_idx, end_idx, scalings,raw_signal_median,raw_signal_mad);
+        n_collapse = 1;
+        while (i + n_collapse < alignments.size() && ea.ref_position ==  alignments[i+n_collapse].ref_position){
+            const event_alignment_t& new_ea = alignments[i+n_collapse];
+            uint64_t new_start_idx = (et->event)[new_ea.event_idx].start; //inclusive
+            uint64_t new_end_idx = (et->event)[new_ea.event_idx].start + (uint64_t)((et->event)[new_ea.event_idx].length); //non-inclusive
+            std::vector<float> new_samples = get_scaled_samples_redd(rawptr, new_start_idx, new_end_idx, scalings,raw_signal_median,raw_signal_mad);
+            samples.insert(samples.end(), new_samples.begin(), new_samples.end());
+            // if(strcmp(ea.model_kmer,alignments[i+n_collapse].model_kmer)!=0){ //TODO: NNNN kmers must be handled
+            //     fprintf(stderr, "model kmer does not match! %s vs %s\n",ea.model_kmer,alignments[i+n_collapse].model_kmer);
+            // }
+            event_idx_end = new_ea.event_idx;
+            n_collapse++;
+            
+        }
+        // sprintf_append(sp, "%s\t", ea.model_kmer);
+        float mean = 0.0;
+        float stdev = 0.0;
+        float skewness = 0.0;
+        float kurtosis = 0.0;
+        size_t length = 0;
+        get_raw_signals_feature(samples,mean, length,stdev, skewness, kurtosis);
+        ReDDFeature redd_feature;
+        if (!ea.rc){
+            redd_feature = {ea.ref_position,ea.ref_kmer[0],ea.model_kmer[0],event_idx_start,event_idx_end,mean,stdev,skewness,kurtosis,length};
+        } else {
+            // if map to the RC strand, make the ref base RC instead of read
+            redd_feature = {ea.ref_position,complement_dna[rank_dna[(int)ea.ref_kmer[0]]],ea.model_kmer[kmer_size-1],event_idx_start,event_idx_end,mean,stdev,skewness,kurtosis,length};
+        }
+         
+        
+        if (!redd_feature_vec.empty()){
+            // check whether consecutive with previous event
+            ReDDFeature prev_base_redd_feature = redd_feature_vec.back();
+            if ((prev_base_redd_feature.event_idx_end + 1  != redd_feature.event_idx_start && !ea.rc) && (prev_base_redd_feature.event_idx_end - 1  != redd_feature.event_idx_start && ea.rc)){
+                redd_feature_vec.clear();
+            }     
+        };
+        redd_feature_vec.push_back(redd_feature);
+
+        if (redd_feature_vec.size() >= redd_window_size){
+            if (redd_feature_vec[redd_feature_vec.size()-1-half_redd_window_size].ref_base == 'A'){
+                std::vector<ReDDDataPoint> data_point_vec;
+                for (int feature_index = redd_feature_vec.size() - redd_window_size; feature_index < redd_feature_vec.size();feature_index+=1 ){
+                    ReDDFeature feature = redd_feature_vec[feature_index];
+                    ReDDDataPoint data_point = {{feature.mean,feature.stdev,(float)feature.length,feature.skewness,feature.kurtosis},get_encoding(feature.ref_base),get_encoding(feature.read_base)};
+                    data_point_vec.push_back(data_point);
+                    // sprintf_append(sp, "%s\t%s\t%d\t%c\t%c\t%c\t%d\t%d\t",
+                    // ref_name, //ea.ref_name.c_str(),
+                    // read_name,
+                    // feature.ref_pos,
+                    // feature.ref_base,
+                    // feature.read_base,
+                    //  //sr.read_name.c_str(),
+                    // strand,
+                    // feature.event_idx_start,
+                    // feature.event_idx_end); //"tc"[ea.strand_idx]);
+                    // sprintf_append(sp, "%.6f\t%.6f\t%d\t%.6f\t%.6f",
+                    //     feature.mean, //ea.ref_name.c_str(),
+                    //     feature.stdev,
+                    //     feature.length,
+                    //     feature.skewness, //sr.read_name.c_str(),
+                    //     feature.kurtosis); //"tc"[ea.strand_idx]);
+                    //  sprintf_append(sp, "\n");
+                };
+                read_data_point_vec.push_back(data_point_vec);
+                // sprintf_append(sp, "==========================================================");
+                // sprintf_append(sp, "\n");
+                // double X_data[2][4] = { {1.2, 2.3, 3.4, 4.5},
+                //              {5.6, 6.7, 7.8, 8.9}};
+                // append_to_dataset(dset_X,     H5T_NATIVE_DOUBLE, 2, 4, X_data);
+
+
+            }
+        }
+        if (redd_feature_vec.size() > 2 * redd_window_size){
+            redd_feature_vec.erase(redd_feature_vec.begin(), redd_feature_vec.begin() + redd_window_size);
+        }
+
+
+    }
+    // fprintf(stderr, "%d\n", read_data_point_vec.size());
+    // fprintf(stderr, "%.3f\n", read_data_point_vec[0][4].X[0]);
+    // *num_data_points = read_data_point_vec.size();
+    // fprintf(stderr, "%.3f\n", read_data_point_vec[0][0].X[0]);
+    // fprintf(stderr, "%.3f\n", read_data_point_vec.data()[0][0].X[0]);
+    return read_data_point_vec;
+
+
+    //str_free(sp); //freeing is later done in free_db_tmp()
+    // return sp->s;
 }
 
 // algo:

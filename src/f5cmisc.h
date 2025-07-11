@@ -85,6 +85,11 @@ char *emit_event_alignment_tsv_m6anet(uint32_t strand_idx,
                               const std::vector<event_alignment_t>& alignments,
                               int8_t print_read_names, int8_t scale_events, int8_t write_samples, int8_t write_signal_index, int8_t collapse,
                               int64_t read_index, char* read_name, char *ref_name, float sample_rate, float *samples);
+std::vector<std::vector<ReDDDataPoint>> emit_event_alignment_tsv_redd(uint32_t strand_idx,
+                              const event_table* et, model_t* model, uint32_t kmer_size, scalings_t scalings,
+                              const std::vector<event_alignment_t>& alignments,
+                              int8_t print_read_names, int8_t scale_events, int8_t write_samples, int8_t write_signal_index, int8_t collapse,
+                              int64_t read_index, char* read_name, char *ref_name,float sample_rate, float *samples,int64_t len_raw_signal);
 void emit_event_alignment_tsv_header(FILE* fp, int8_t print_read_names, int8_t write_samples, int8_t write_signal_index);
 void emit_event_alignment_tsv_m6anet_header(FILE* fp, int8_t print_read_names, int8_t write_signal_index);
 void emit_sam_header(samFile* fp, const bam_hdr_t* hdr);
