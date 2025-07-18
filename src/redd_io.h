@@ -46,41 +46,51 @@ inline void init_redd_candidate_ratio_map(core_t* core){
 inline void init_redd_hdf5_file(core_t* core,std::string output_file){
     std::remove(output_file.c_str());
     HighFive::File file(output_file, HighFive::File::ReadWrite | HighFive::File::Create);
+    HighFive::DataSetAccessProps cacheConfig;
+    cacheConfig.add(HighFive::Caching(58193, 1024*1024*1024, 1.0));
+
     HighFive::DataSetCreateProps X_props;
     X_props.add(HighFive::Chunking({10240,core->opt.redd_window_size,5}));
+    X_props.add(HighFive::Deflate(9));
     HighFive::DataSetCreateProps y_props;
     y_props.add(HighFive::Chunking({10240,core->opt.redd_window_size}));
-    HighFive::DataSetCreateProps ratio_props;
-    ratio_props.add(HighFive::Chunking({10240}));
+    y_props.add(HighFive::Deflate(9));
+    HighFive::DataSetCreateProps info_props;
+    info_props.add(HighFive::Chunking({10240}));
+    info_props.add(HighFive::Deflate(9));
     // Create a dataset with an unlimited dimension for appending
     file.createDataSet<float>(
         "/X",
         HighFive::DataSpace({0,core->opt.redd_window_size,5}, {HighFive::DataSpace::UNLIMITED,core->opt.redd_window_size,5}), // Initial size 10, unlimited max
-        X_props // Chunking required for extendable datasets
+        X_props, // Chunking required for extendable datasets
+        cacheConfig
     );
     file.createDataSet<uint32_t>(
         "/y_ref",
         HighFive::DataSpace({0,core->opt.redd_window_size}, {HighFive::DataSpace::UNLIMITED,core->opt.redd_window_size}), // Initial size 10, unlimited max
-        y_props // Chunking required for extendable datasets
+        y_props, // Chunking required for extendable datasets
+        cacheConfig
     );
     file.createDataSet<uint32_t>(
         "/y_call",
         HighFive::DataSpace({0,core->opt.redd_window_size}, {HighFive::DataSpace::UNLIMITED,core->opt.redd_window_size}), // Initial size 10, unlimited max
-        y_props // Chunking required for extendable datasets
+        y_props, // Chunking required for extendable datasets
+        cacheConfig
     );
-    file.createDataSet<float>(
-        "/ratio",
+    file.createDataSet<std::string>(
+        "/info",
         HighFive::DataSpace({0}, {HighFive::DataSpace::UNLIMITED}), // Initial size 10, unlimited max
-        ratio_props // Chunking required for extendable datasets
+        info_props, // Chunking required for extendable datasets
+        cacheConfig
     );
 };
 inline void append_arr_to_dataset(core_t* core,std::string output_file,
     std::vector<std::vector<std::vector<float>>> X_arr, 
     std::vector<std::vector<uint32_t>> y_ref_arr,
     std::vector<std::vector<uint32_t>> y_call_arr,
-    std::vector<float> ratio_arr){
+    std::vector<std::string> info_arr){
     HighFive::File hdf5_output(output_file, HighFive::File::ReadWrite);
-    auto ratio_dataset = hdf5_output.getDataSet("ratio");
+    auto info_dataset = hdf5_output.getDataSet("info");
     auto X_dataset = hdf5_output.getDataSet("X");
     auto y_ref_dataset = hdf5_output.getDataSet("y_ref");
     auto y_call_dataset = hdf5_output.getDataSet("y_call");
@@ -93,12 +103,9 @@ inline void append_arr_to_dataset(core_t* core,std::string output_file,
     existing_shape = y_call_dataset.getDimensions()[0];
     y_call_dataset.resize({existing_shape + y_call_arr.size(), core->opt.redd_window_size});
     y_call_dataset.select({existing_shape, 0}, {y_call_arr.size(), core->opt.redd_window_size}).write(y_call_arr);
-    if (!ratio_arr.empty()){
-        existing_shape = ratio_dataset.getDimensions()[0];
-        ratio_dataset.resize({existing_shape + ratio_arr.size()});
-        ratio_dataset.select({existing_shape}, {ratio_arr.size()}).write(ratio_arr);
-
-    }
+    existing_shape = info_dataset.getDimensions()[0];
+    info_dataset.resize({existing_shape + info_arr.size()});
+    info_dataset.select({existing_shape}, {info_arr.size()}).write(info_arr);
 
 
 };

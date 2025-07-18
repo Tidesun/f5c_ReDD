@@ -2398,17 +2398,35 @@ std::vector<std::vector<redd_data_point_t>> emit_event_alignment_tsv_redd(uint32
             if (redd_feature_vec[redd_feature_vec.size()-1-half_redd_window_size].ref_base == 'A'){
                 redd_feature_t center_feature = redd_feature_vec[redd_feature_vec.size()-1-half_redd_window_size];
                 std::vector<redd_data_point_t> data_point_vec;
-                float ratio = -1.0;
+                float ratio = - 1;
                 if (!redd_candidate_ratio_map.empty()){
                     if (redd_candidate_ratio_map.find(ref_name) != redd_candidate_ratio_map.end()){
+
                         if (redd_candidate_ratio_map[ref_name].find(center_feature.ref_pos) != redd_candidate_ratio_map[ref_name].end()){
                             ratio = redd_candidate_ratio_map[ref_name][center_feature.ref_pos];
                         }
                     }
                 }
+                bool is_candidate = false;
+                 std::string info_str;
+                std::stringstream ss;
+
                 for (int feature_index = redd_feature_vec.size() - redd_window_size; feature_index < redd_feature_vec.size();feature_index+=1 ){
+ 
+                    // only add info to the first point
+                    if (feature_index == redd_feature_vec.size() - redd_window_size){
+                        if (ratio != -1){
+                            is_candidate = true;
+                            ss << "I:" << ratio <<"\t" << read_name << "\t" << ref_name << "\t" << center_feature.ref_pos << "\t" << strand;
+                        } else {
+                            is_candidate = false;
+                            ss << "I\t" << read_name << "\t" << ref_name << "\t" << center_feature.ref_pos << "\t" << strand;
+                        }
+                        info_str = ss.str();
+                    }
+
                     redd_feature_t feature = redd_feature_vec[feature_index];
-                    redd_data_point_t data_point = {{feature.mean,feature.stdev,(float)feature.length,feature.skewness,feature.kurtosis},get_encoding(feature.ref_base),get_encoding(feature.read_base),ratio};
+                    redd_data_point_t data_point = {{feature.mean,feature.stdev,(float)feature.length,feature.skewness,feature.kurtosis},get_encoding(feature.ref_base),get_encoding(feature.read_base),is_candidate,info_str};
                     data_point_vec.push_back(data_point);
                     // sprintf_append(sp, "%s\t%s\t%d\t%c\t%c\t%c\t%d\t%d\t",
                     // ref_name, //ea.ref_name.c_str(),

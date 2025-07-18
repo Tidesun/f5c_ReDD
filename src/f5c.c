@@ -1051,11 +1051,12 @@ void output_db(core_t* core, db_t* db) {
     std::vector<std::vector<std::vector<float>>> X_arr;
     std::vector<std::vector<uint32_t>> y_ref_arr;
     std::vector<std::vector<uint32_t>> y_call_arr;
+    std::vector<std::string> info_arr;
     
     std::vector<std::vector<std::vector<float>>> X_candidate_arr;
     std::vector<std::vector<uint32_t>> y_ref_candidate_arr;
     std::vector<std::vector<uint32_t>> y_call_candidate_arr;
-    std::vector<float> ratio_candidate_arr;
+    std::vector<std::string> info_candidate_arr;
 
     int32_t i = 0;
     for (i = 0; i < db->n_bam_rec; i++){
@@ -1106,11 +1107,11 @@ void output_db(core_t* core, db_t* db) {
                 std::vector<std::vector<redd_data_point_t>> read_data_points_vec = *(db->redd_data_point_vec[i]);
 
                 for (size_t j =0;j<read_data_points_vec.size();j++){
-                    if (read_data_points_vec[j][0].ratio != -1){
+                    if (read_data_points_vec[j][0].is_candidate){
                         X_candidate_arr.push_back(std::vector<std::vector<float>>());
                         y_ref_candidate_arr.push_back(std::vector<uint32_t>());
                         y_call_candidate_arr.push_back(std::vector<uint32_t>());
-                        ratio_candidate_arr.push_back(read_data_points_vec[j][0].ratio);
+                        info_candidate_arr.push_back(read_data_points_vec[j][0].info);
                         for (redd_data_point_t &data_point:read_data_points_vec[j]){
                             X_candidate_arr.back().push_back(data_point.X);
                             y_ref_candidate_arr.back().push_back(data_point.y_ref);
@@ -1120,6 +1121,7 @@ void output_db(core_t* core, db_t* db) {
                         X_arr.push_back(std::vector<std::vector<float>>());
                         y_ref_arr.push_back(std::vector<uint32_t>());
                         y_call_arr.push_back(std::vector<uint32_t>());
+                        info_arr.push_back(read_data_points_vec[j][0].info);
                         for (redd_data_point_t &data_point:read_data_points_vec[j]){
                             X_arr.back().push_back(data_point.X);
                             y_ref_arr.back().push_back(data_point.y_ref);
@@ -1152,10 +1154,10 @@ void output_db(core_t* core, db_t* db) {
         }
     }
     if (core->opt.redd_candidate_file == NULL){
-        append_arr_to_dataset(core,core->hdf5_output_file_prefix+".hdf5",X_arr,y_ref_arr,y_call_arr, std::vector<float>());
+        append_arr_to_dataset(core,core->hdf5_output_file_prefix+".hdf5",X_arr,y_ref_arr,y_call_arr, info_arr);
     } else {
-        append_arr_to_dataset(core,core->hdf5_output_file_prefix+".candidate.hdf5",X_candidate_arr,y_ref_candidate_arr,y_call_candidate_arr,ratio_candidate_arr);
-        append_arr_to_dataset(core,core->hdf5_output_file_prefix+".noncandidate.hdf5",X_arr,y_ref_arr,y_call_arr, std::vector<float>());
+        append_arr_to_dataset(core,core->hdf5_output_file_prefix+".candidate.hdf5",X_candidate_arr,y_ref_candidate_arr,y_call_candidate_arr,info_candidate_arr);
+        append_arr_to_dataset(core,core->hdf5_output_file_prefix+".noncandidate.hdf5",X_arr,y_ref_arr,y_call_arr, info_arr);
     }
 
     fflush(stdout);

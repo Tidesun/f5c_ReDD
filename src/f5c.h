@@ -293,7 +293,8 @@ typedef struct {
     std::vector<float> X;
     uint32_t y_ref;
     uint32_t y_call; 
-    float ratio;
+    bool is_candidate;
+    std::string info;
 } redd_data_point_t;
 /* a batch of read data (dynamic data based on the reads) */
 typedef struct {

@@ -18,7 +18,34 @@
 
 #include <sys/wait.h>
 #include <unistd.h>
+#define METHYLATED_SYMBOL 'M'
+static const char* complement_dna = "TGCA";
+static const uint8_t rank_dna[256] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
+//from https://github.com/hasindu2008/f5c/blob/64d9d51cd773e46e1a72dbf2e2bf333be24df7c4/meth.c
+//reverse-complement a DNA string
+static inline std::string reverse_complement(const std::string& str) {
+    std::string out(str.length(), 'A');
+    size_t i = 0;             // input
+    int j = str.length() - 1; // output
+    while (i < str.length()) {
+        // complement a single base
+        assert(str[i] != METHYLATED_SYMBOL);
+        out[j--] = complement_dna[rank_dna[(int)str[i++]]];
+    }
+    return out;
+}
 //in f5c.c
 void pthread_db(core_t* core, db_t* db, void (*func)(core_t*,db_t*,int));
 
@@ -563,19 +590,19 @@ ret_status_t load_db1(core_t* core, db_t* db) { //no iop - used for slow5
                 std::string fast5_path_str;
                 t = realtime();
                 //todo : make efficient (redudantly accessed below, can be combined with it?)
-                int64_t read_length=core->readbb->get_read_sequence(qname).size();
+                // int64_t read_length=core->readbb->get_read_sequence(qname).size();
                 if(!(core->opt.flag & F5C_RD_SLOW5)){ //if not slow5
                     fast5_path_str = core->readbb->get_signal_path(qname);
                 }
                 core->db_fasta_time += realtime() - t;
 
                 //skipping ultra-long-reads
-                if(core->ultra_long_tmp!=NULL && read_length > core->opt.ultra_thresh){
-                    db->ultra_long_skipped++;
-                    int ret_wr=sam_write1(core->ultra_long_tmp,core->m_hdr,record);
-                    NEG_CHK(ret_wr);
-                    continue;
-                }
+                // if(core->ultra_long_tmp!=NULL && read_length > core->opt.ultra_thresh){
+                //     db->ultra_long_skipped++;
+                //     int ret_wr=sam_write1(core->ultra_long_tmp,core->m_hdr,record);
+                //     NEG_CHK(ret_wr);
+                //     continue;
+                // }
 
                 if(!(core->opt.flag & F5C_RD_SLOW5) && fast5_path_str==""){
                     handle_bad_fast5(core, db,fast5_path_str,qname);
@@ -598,7 +625,7 @@ ret_status_t load_db1(core_t* core, db_t* db) { //no iop - used for slow5
                 }
                 if(read_status==1){
                     db->n_bam_rec++;
-                    status.num_bases += read_length;
+                    // status.num_bases += read_length;
                 }
 
             } else {
@@ -626,6 +653,7 @@ ret_status_t load_db1(core_t* core, db_t* db) { //no iop - used for slow5
         t = realtime();
         char* refseq = faidx_fetch_seq(core->fai, ref_name, ref_start_pos, ref_end_pos, &fetched_len); // todo : error handle?
         core->db_fasta_time += realtime() - t;
+        // fprintf(stderr, "\n[%s]     - fasta load time: %.3f sec", __func__, core->db_fasta_time);
         db->fasta_cache[i] = refseq;
         // printf("seq : %s\n",db->fasta_cache[i]);
 
@@ -633,16 +661,47 @@ ret_status_t load_db1(core_t* core, db_t* db) { //no iop - used for slow5
         std::string qname = bam_get_qname(db->bam_rec[i]);
 
         t = realtime();
-        std::string read_seq = core->readbb->get_read_sequence(qname);
+        int l_qseq = record->core.l_qseq;
+
+        // Get a pointer to the packed sequence data
+        uint8_t *seq = bam_get_seq(record);
+
+        // Iterate through the sequence and retrieve each base
+        // std::string read_seq = "";
+        // char *read_seq = (char *)malloc(l_qseq+1);
+        std::string read_seq = "";
+        for (int i = 0; i < l_qseq; i++) {
+            char base = seq_nt16_str[bam_seqi(seq, i)]; // seq_nt16_str maps the 4-bit representation to a character
+            if(core->opt.flag & F5C_RNA){
+                if (base == 'U')
+                    base = 'T';
+            }
+            read_seq.push_back(base);
+        }
+        if (record->core.flag & 16)
+            read_seq = reverse_complement(read_seq);
+        // std::string old_read_seq = core->readbb->get_read_sequence(qname);
+        // if (strcmp(old_read_seq.c_str(),read_seq.c_str())!=0){
+        //     fprintf(stderr, "%s\n",qname);
+        //     fprintf(stderr, "%s\n",old_read_seq.c_str());
+        //     fprintf(stderr, "%s\n",read_seq.c_str());
+
+        // }
+
         core->db_fasta_time += realtime() - t;
+        // fprintf(stderr, "\n[%s]     - fasta load time: %.3f sec", __func__, core->db_fasta_time);
 
         db->read[i] = (char*)malloc(read_seq.size() + 1); // todo : is +1 needed? do errorcheck
         strcpy(db->read[i], read_seq.c_str());
         db->read_len[i] = strlen(db->read[i]);
-        if(core->opt.flag & F5C_RNA){
-            replace_char(db->read[i], 'U', 'T');
-        }
+        // fprintf(stderr, "%s\n",qname);
+        // fprintf(stderr, "%d\n",db->read_len[i]);
+        // fprintf(stderr, "%s\n",db->read[i]);
+        // if(core->opt.flag & F5C_RNA){
+        //     replace_char(db->read[i], 'U', 'T');
+        // }
         db->sum_bases += db->read_len[i];
+        status.num_bases += db->read_len[i];
 
         db->read_stat_flag[i] = 0; //reset the flag
     }
