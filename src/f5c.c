@@ -532,12 +532,12 @@ db_t* init_db(core_t* core) {
         // db->event_alignment_result_str = (char **)malloc(sizeof(char *) * db->capacity_bam_rec);
         // MALLOC_CHK(db->event_alignment_result_str);
         
-        db->redd_data_point_vec = (std::vector<std::vector<redd_data_point_t>> **)malloc(sizeof(std::vector<std::vector<redd_data_point_t>> *) * db->capacity_bam_rec);
-        MALLOC_CHK(db->redd_data_point_vec);
+        db->redd_data_vec = (redd_data_t **)malloc(sizeof(redd_data_t *) * db->capacity_bam_rec);
+        MALLOC_CHK(db->redd_data_vec);
 
         for (i = 0; i < db->capacity_bam_rec; ++i) {
-            db->redd_data_point_vec[i] = new std::vector<std::vector<redd_data_point_t>>;
-            NULL_CHK(db->redd_data_point_vec[i]);
+            db->redd_data_vec[i] = new redd_data_t;
+            NULL_CHK(db->redd_data_vec[i]);
             db->event_alignment_result[i] = new std::vector<event_alignment_t> ;
             NULL_CHK(db->event_alignment_result[i]);
             (db->eventalign_summary[i]).num_events=0; //done here in the same loop for efficiency
@@ -887,15 +887,15 @@ void eventalign_single(core_t* core, db_t* db, int32_t i){
         //            db->read_idx[i], qname, contig, db->sig[i]->sample_rate, db->sig[i]->rawptr);
     } else if (redd_output){
         // std::string dummy_str= "\n";
-        *db->redd_data_point_vec[i] = emit_event_alignment_tsv_redd(0,&(db->et[i]),core->model,core->kmer_size, db->scalings[i],*event_alignment_result, print_read_names, scale_events, write_samples, write_signal_index, collapse_events,
+        *db->redd_data_vec[i] = emit_event_alignment_tsv_redd(0,&(db->et[i]),core->model,core->kmer_size, db->scalings[i],*event_alignment_result, print_read_names, scale_events, write_samples, write_signal_index, collapse_events,
                    db->read_idx[i], qname, contig, db->sig[i]->sample_rate, db->sig[i]->rawptr,db->sig[i]->nsample,core->opt.redd_window_size,core->redd_candidate_ratio_map);
         // fprintf(stderr, "%d\n", db->redd_num_data_points[i]);
-        // db->redd_data_point_vec[i] = new std::vector<redd_data_point_t>;
-        // db->redd_data_point_vec[i] = read_data_point_vec.data();
+        // db->redd_data_vec[i] = new std::vector<redd_data_t>;
+        // db->redd_data_vec[i] = read_data_point_vec.data();
 
-        // fprintf(stderr, "%.3f\n", db->redd_data_point_vec[i][0][0].X[0]);
+        // fprintf(stderr, "%.3f\n", db->redd_data_vec[i][0][0].X[0]);
         // fprintf(stderr, "%.3f\n", read_data_point_vec[0][0].X[0]);
-        // db->redd_data_point_vec[i] = std::move(read_data_point_vec).data();
+        // db->redd_data_vec[i] = std::move(read_data_point_vec).data();
         // db->redd_num_data_points[i] = read_data_point_vec.size();
         // db->redd_num_data_points[i];
     } else {
@@ -1104,33 +1104,17 @@ void output_db(core_t* core, db_t* db) {
                     fprintf(summary_fp, "%d\t%d\t%d\t%d\t", summary.num_events, summary.num_steps, summary.num_skips, summary.num_stays);
                     fprintf(summary_fp, "%.2lf\t%.3lf\t%.3lf\t%.3lf\t%.3lf\n", summary.sum_duration/(db->sig[i]->sample_rate), scalings.shift, scalings.scale, 0.0, scalings.var);
                 }
-                std::vector<std::vector<redd_data_point_t>> read_data_points_vec = *(db->redd_data_point_vec[i]);
-
-                for (size_t j =0;j<read_data_points_vec.size();j++){
-                    if (read_data_points_vec[j][0].is_candidate){
-                        X_candidate_arr.push_back(std::vector<std::vector<float>>());
-                        y_ref_candidate_arr.push_back(std::vector<uint32_t>());
-                        y_call_candidate_arr.push_back(std::vector<uint32_t>());
-                        info_candidate_arr.push_back(read_data_points_vec[j][0].info);
-                        for (redd_data_point_t &data_point:read_data_points_vec[j]){
-                            X_candidate_arr.back().push_back(data_point.X);
-                            y_ref_candidate_arr.back().push_back(data_point.y_ref);
-                            y_call_candidate_arr.back().push_back(data_point.y_call);
-                        }
-                    } else {
-                        X_arr.push_back(std::vector<std::vector<float>>());
-                        y_ref_arr.push_back(std::vector<uint32_t>());
-                        y_call_arr.push_back(std::vector<uint32_t>());
-                        info_arr.push_back(read_data_points_vec[j][0].info);
-                        for (redd_data_point_t &data_point:read_data_points_vec[j]){
-                            X_arr.back().push_back(data_point.X);
-                            y_ref_arr.back().push_back(data_point.y_ref);
-                            y_call_arr.back().push_back(data_point.y_call);
-                        }
-
-                    }
-                   
+                redd_data_t read_redd_data = *(db->redd_data_vec[i]);
+                if (core->opt.redd_candidate_file != NULL){
+                    X_candidate_arr.insert(X_candidate_arr.end(), read_redd_data.X_candidate.begin(), read_redd_data.X_candidate.end());
+                    y_ref_candidate_arr.insert(y_ref_candidate_arr.end(), read_redd_data.y_ref_candidate.begin(), read_redd_data.y_ref_candidate.end());
+                    y_call_candidate_arr.insert(y_call_candidate_arr.end(), read_redd_data.y_call_candidate.begin(), read_redd_data.y_call_candidate.end());
+                    info_candidate_arr.insert(info_candidate_arr.end(), read_redd_data.info_candidate.begin(), read_redd_data.info_candidate.end());
                 }
+                X_arr.insert(X_arr.end(), read_redd_data.X.begin(), read_redd_data.X.end());
+                y_ref_arr.insert(y_ref_arr.end(), read_redd_data.y_ref.begin(), read_redd_data.y_ref.end());
+                y_call_arr.insert(y_call_arr.end(), read_redd_data.y_call.begin(), read_redd_data.y_call.end());
+                info_arr.insert(info_arr.end(), read_redd_data.info.begin(), read_redd_data.info.end());
 
 
                 // char *event_alignment_result_str = db->event_alignment_result_str[i];
@@ -1190,9 +1174,9 @@ void free_db_tmp(db_t* db) {
             delete db->event_alignment_result[i];
             db->event_alignment_result[i] = new std::vector<event_alignment_t>;
         }
-        if(db->redd_data_point_vec){ //eventalign related
-            delete db->redd_data_point_vec[i];
-            db->redd_data_point_vec[i]=new std::vector<std::vector<redd_data_point_t>> ;
+        if(db->redd_data_vec){ //eventalign related
+            delete db->redd_data_vec[i];
+            db->redd_data_vec[i]=new redd_data_t;
         }
         // if(db->event_alignment_result_str){ //eventalign related
         //     free(db->event_alignment_result_str[i]);
@@ -1236,9 +1220,9 @@ void free_db(db_t* db) {
         }
         free(db->event_alignment_result);
     }
-    if(db->redd_data_point_vec){ //eventalign related
+    if(db->redd_data_vec){ //eventalign related
             for (i = 0; i < db->capacity_bam_rec; ++i) {
-                delete db->redd_data_point_vec[i];
+                delete db->redd_data_vec[i];
         }
         }
     // if(db->event_alignment_result_str){

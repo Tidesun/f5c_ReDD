@@ -290,12 +290,15 @@ typedef struct {
 
 } signal_t;
 typedef struct {
-    std::vector<float> X;
-    uint32_t y_ref;
-    uint32_t y_call; 
-    bool is_candidate;
-    std::string info;
-} redd_data_point_t;
+    std::vector<std::vector<std::vector<float>>> X;
+    std::vector<std::vector<uint32_t>> y_ref;
+    std::vector<std::vector<uint32_t>> y_call; 
+    std::vector<std::string> info;
+    std::vector<std::vector<std::vector<float>>> X_candidate;
+    std::vector<std::vector<uint32_t>> y_ref_candidate;
+    std::vector<std::vector<uint32_t>> y_call_candidate; 
+    std::vector<std::string> info_candidate;
+} redd_data_t;
 /* a batch of read data (dynamic data based on the reads) */
 typedef struct {
     // region string
@@ -357,7 +360,7 @@ typedef struct {
     //TODO : convert this to a C array and get rid of include <vector>
     std::vector<event_alignment_t> **event_alignment_result;
     char **event_alignment_result_str;
-    std::vector<std::vector<redd_data_point_t>> **redd_data_point_vec;     
+    redd_data_t **redd_data_vec;     
 
 
 } db_t;

@@ -2306,14 +2306,14 @@ typedef struct {
     float kurtosis;
     size_t length;
 } redd_feature_t;
-std::vector<std::vector<redd_data_point_t>> emit_event_alignment_tsv_redd(uint32_t strand_idx,
+redd_data_t emit_event_alignment_tsv_redd(uint32_t strand_idx,
                               const event_table* et, model_t* model, uint32_t kmer_size, scalings_t scalings,
                               const std::vector<event_alignment_t>& alignments,
                               int8_t print_read_names, int8_t scale_events, int8_t write_samples, int8_t write_signal_index, int8_t collapse,
                               int64_t read_index, char* read_name, char *ref_name,float sample_rate, float *rawptr,int64_t len_raw_signal,int64_t redd_window_size,std::unordered_map<std::string, std::unordered_map<u_int64_t, float>> redd_candidate_ratio_map)
 {
-    std::vector<std::vector<redd_data_point_t>> read_data_point_vec;
-    int64_t half_redd_window_size = redd_window_size/2;
+    redd_data_t single_read_redd_data;
+    int half_redd_window_size = redd_window_size/2;
     float raw_signal_median = get_median_pa(rawptr,len_raw_signal);
     float raw_signal_mad = get_median_mad_pa(rawptr,len_raw_signal);
 
@@ -2325,80 +2325,65 @@ std::vector<std::vector<redd_data_point_t>> emit_event_alignment_tsv_redd(uint32
     std::vector<redd_feature_t> redd_feature_vec;
     size_t event_idx_start = -1;
     size_t event_idx_end = -1;
-    for(size_t i = 0; i < alignments.size(); i+=n_collapse) {
-    
-        const event_alignment_t& ea = alignments[i];
-        event_idx_start = ea.event_idx;
-        event_idx_end = ea.event_idx;
-        char strand = ea.rc ? '-' : '+';
-        // basic information
-        // if (!print_read_names)
-        // {
-        //     sprintf_append(sp, "%s\t%d\t%s\t%ld\t%c\t",
-        //             ref_name, //ea.ref_name.c_str(),
-        //             ea.ref_position,
-        //             ea.ref_kmer,
-        //             (long)read_index,
-        //             strand); //"tc"[ea.strand_idx]);
-        // }
-        // else
-        // {
-        //     sprintf_append(sp, "%s\t%d\t%s\t%s\t%c\t",
-        //             ref_name, //ea.ref_name.c_str(),
-        //             ea.ref_position,
-        //             ea.ref_kmer,
-        //             read_name, //sr.read_name.c_str(),
-        //             strand); //"tc"[ea.strand_idx]);
-        // }
+    char strand = alignments[0].rc ? '-' : '+';
+    // for(int i = 0; i < alignments.size()+half_redd_window_size; i+=n_collapse) {
 
-        uint64_t start_idx = (et->event)[ea.event_idx].start; //inclusive
-        uint64_t end_idx = (et->event)[ea.event_idx].start + (uint64_t)((et->event)[ea.event_idx].length); //non-inclusive
-
-        std::vector<float> samples = get_scaled_samples_redd(rawptr, start_idx, end_idx, scalings,raw_signal_median,raw_signal_mad);
-        n_collapse = 1;
-        while (i + n_collapse < alignments.size() && ea.ref_position ==  alignments[i+n_collapse].ref_position){
-            const event_alignment_t& new_ea = alignments[i+n_collapse];
-            uint64_t new_start_idx = (et->event)[new_ea.event_idx].start; //inclusive
-            uint64_t new_end_idx = (et->event)[new_ea.event_idx].start + (uint64_t)((et->event)[new_ea.event_idx].length); //non-inclusive
-            std::vector<float> new_samples = get_scaled_samples_redd(rawptr, new_start_idx, new_end_idx, scalings,raw_signal_median,raw_signal_mad);
-            samples.insert(samples.end(), new_samples.begin(), new_samples.end());
-            // if(strcmp(ea.model_kmer,alignments[i+n_collapse].model_kmer)!=0){ //TODO: NNNN kmers must be handled
-            //     fprintf(stderr, "model kmer does not match! %s vs %s\n",ea.model_kmer,alignments[i+n_collapse].model_kmer);
-            // }
-            event_idx_end = new_ea.event_idx;
-            n_collapse++;
-            
-        }
-        // sprintf_append(sp, "%s\t", ea.model_kmer);
-        float mean = 0.0;
-        float stdev = 0.0;
-        float skewness = 0.0;
-        float kurtosis = 0.0;
-        size_t length = 0;
-        get_raw_signals_feature(samples,mean, length,stdev, skewness, kurtosis);
-        redd_feature_t redd_feature;
-        if (!ea.rc){
-            redd_feature = {ea.ref_position,ea.ref_kmer[0],ea.model_kmer[0],event_idx_start,event_idx_end,mean,stdev,skewness,kurtosis,length};
+    for(int i = 0-half_redd_window_size; i < (int)alignments.size()+half_redd_window_size; i+=n_collapse) {  
+         // considering A in the first base and last base
+        if ((i < 0) || (i >= alignments.size())){
+            n_collapse = 1;
+            redd_feature_t redd_feature = {0,'N','N',0,0,0,0,0,0,0};
+            redd_feature_vec.push_back(redd_feature);
         } else {
-            // if map to the RC strand, make the ref base RC instead of read
-            redd_feature = {ea.ref_position,complement_dna[rank_dna[(int)ea.ref_kmer[0]]],ea.model_kmer[kmer_size-1],event_idx_start,event_idx_end,mean,stdev,skewness,kurtosis,length};
-        }
-         
-        
-        if (!redd_feature_vec.empty()){
-            // check whether consecutive with previous event
-            redd_feature_t prev_base_redd_feature = redd_feature_vec.back();
-            if ((prev_base_redd_feature.event_idx_end + 1  != redd_feature.event_idx_start && !ea.rc) && (prev_base_redd_feature.event_idx_end - 1  != redd_feature.event_idx_start && ea.rc)){
-                redd_feature_vec.clear();
-            }     
-        };
-        redd_feature_vec.push_back(redd_feature);
+            const event_alignment_t& ea = alignments[i];
+            event_idx_start = ea.event_idx;
+            event_idx_end = ea.event_idx;
+            uint64_t start_idx = (et->event)[ea.event_idx].start; //inclusive
+            uint64_t end_idx = (et->event)[ea.event_idx].start + (uint64_t)((et->event)[ea.event_idx].length); //non-inclusive
+
+            std::vector<float> samples = get_scaled_samples_redd(rawptr, start_idx, end_idx, scalings,raw_signal_median,raw_signal_mad);
+            n_collapse = 1;
+            while (i + n_collapse < alignments.size() && ea.ref_position ==  alignments[i+n_collapse].ref_position){
+                const event_alignment_t& new_ea = alignments[i+n_collapse];
+                uint64_t new_start_idx = (et->event)[new_ea.event_idx].start; //inclusive
+                uint64_t new_end_idx = (et->event)[new_ea.event_idx].start + (uint64_t)((et->event)[new_ea.event_idx].length); //non-inclusive
+                std::vector<float> new_samples = get_scaled_samples_redd(rawptr, new_start_idx, new_end_idx, scalings,raw_signal_median,raw_signal_mad);
+                samples.insert(samples.end(), new_samples.begin(), new_samples.end());
+                // if(strcmp(ea.model_kmer,alignments[i+n_collapse].model_kmer)!=0){ //TODO: NNNN kmers must be handled
+                //     fprintf(stderr, "model kmer does not match! %s vs %s\n",ea.model_kmer,alignments[i+n_collapse].model_kmer);
+                // }
+                event_idx_end = new_ea.event_idx;
+                n_collapse++;
+                
+            }
+            // sprintf_append(sp, "%s\t", ea.model_kmer);
+            float mean = 0.0;
+            float stdev = 0.0;
+            float skewness = 0.0;
+            float kurtosis = 0.0;
+            size_t length = 0;
+            get_raw_signals_feature(samples,mean, length,stdev, skewness, kurtosis);
+            redd_feature_t redd_feature;
+            if (!ea.rc){
+                redd_feature = {ea.ref_position,ea.ref_kmer[0],ea.model_kmer[0],event_idx_start,event_idx_end,mean,stdev,skewness,kurtosis,length};
+            } else {
+                // if map to the RC strand, make the ref base RC instead of read
+                redd_feature = {ea.ref_position,complement_dna[rank_dna[(int)ea.ref_kmer[0]]],ea.model_kmer[kmer_size-1],event_idx_start,event_idx_end,mean,stdev,skewness,kurtosis,length};
+            }
+            if (!redd_feature_vec.empty()){
+                // check whether consecutive with previous event
+                redd_feature_t prev_base_redd_feature = redd_feature_vec.back();
+                if ((prev_base_redd_feature.event_idx_end + 1  != redd_feature.event_idx_start && !ea.rc) && (prev_base_redd_feature.event_idx_end - 1  != redd_feature.event_idx_start && ea.rc)){
+                    redd_feature_vec.clear();
+                }     
+            };
+            redd_feature_vec.push_back(redd_feature);
+        } 
 
         if (redd_feature_vec.size() >= redd_window_size){
             if (redd_feature_vec[redd_feature_vec.size()-1-half_redd_window_size].ref_base == 'A'){
                 redd_feature_t center_feature = redd_feature_vec[redd_feature_vec.size()-1-half_redd_window_size];
-                std::vector<redd_data_point_t> data_point_vec;
-                float ratio = - 1;
+                float ratio = -1;
                 if (!redd_candidate_ratio_map.empty()){
                     if (redd_candidate_ratio_map.find(ref_name) != redd_candidate_ratio_map.end()){
 
@@ -2408,50 +2393,43 @@ std::vector<std::vector<redd_data_point_t>> emit_event_alignment_tsv_redd(uint32
                     }
                 }
                 bool is_candidate = false;
-                 std::string info_str;
+                std::string info_str;
                 std::stringstream ss;
+                if (ratio != -1){
+                    is_candidate = true;
+                    ss << "I:" << ratio <<"\t" << read_name << "\t" << ref_name << "\t" << center_feature.ref_pos + 1 << "\t" << strand;
+                } else {
+                    is_candidate = false;
+                    ss << "I\t" << read_name << "\t" << ref_name << "\t" << center_feature.ref_pos + 1 << "\t" << strand;
+                }
+                info_str = ss.str();
+                if (is_candidate){
+                    single_read_redd_data.X_candidate.push_back(std::vector<std::vector<float>>());
+                    single_read_redd_data.y_call_candidate.push_back(std::vector<uint32_t>());
+                    single_read_redd_data.y_ref_candidate.push_back(std::vector<uint32_t>());
+                    single_read_redd_data.info_candidate.push_back(info_str);
+                } else {
+                    single_read_redd_data.X.push_back(std::vector<std::vector<float>>());
+                    single_read_redd_data.y_call.push_back(std::vector<uint32_t>());
+                    single_read_redd_data.y_ref.push_back(std::vector<uint32_t>());
+                    single_read_redd_data.info.push_back(info_str);
+                }
 
                 for (int feature_index = redd_feature_vec.size() - redd_window_size; feature_index < redd_feature_vec.size();feature_index+=1 ){
- 
-                    // only add info to the first point
-                    if (feature_index == redd_feature_vec.size() - redd_window_size){
-                        if (ratio != -1){
-                            is_candidate = true;
-                            ss << "I:" << ratio <<"\t" << read_name << "\t" << ref_name << "\t" << center_feature.ref_pos << "\t" << strand;
-                        } else {
-                            is_candidate = false;
-                            ss << "I\t" << read_name << "\t" << ref_name << "\t" << center_feature.ref_pos << "\t" << strand;
-                        }
-                        info_str = ss.str();
-                    }
 
                     redd_feature_t feature = redd_feature_vec[feature_index];
-                    redd_data_point_t data_point = {{feature.mean,feature.stdev,(float)feature.length,feature.skewness,feature.kurtosis},get_encoding(feature.ref_base),get_encoding(feature.read_base),is_candidate,info_str};
-                    data_point_vec.push_back(data_point);
-                    // sprintf_append(sp, "%s\t%s\t%d\t%c\t%c\t%c\t%d\t%d\t",
-                    // ref_name, //ea.ref_name.c_str(),
-                    // read_name,
-                    // feature.ref_pos,
-                    // feature.ref_base,
-                    // feature.read_base,
-                    //  //sr.read_name.c_str(),
-                    // strand,
-                    // feature.event_idx_start,
-                    // feature.event_idx_end); //"tc"[ea.strand_idx]);
-                    // sprintf_append(sp, "%.6f\t%.6f\t%d\t%.6f\t%.6f",
-                    //     feature.mean, //ea.ref_name.c_str(),
-                    //     feature.stdev,
-                    //     feature.length,
-                    //     feature.skewness, //sr.read_name.c_str(),
-                    //     feature.kurtosis); //"tc"[ea.strand_idx]);
-                    //  sprintf_append(sp, "\n");
+                     if (is_candidate){
+                        single_read_redd_data.X_candidate.back().push_back({feature.mean,feature.stdev,(float)feature.length,feature.skewness,feature.kurtosis});
+                        single_read_redd_data.y_ref_candidate.back().push_back(get_encoding(feature.ref_base));
+                        single_read_redd_data.y_call_candidate.back().push_back(get_encoding(feature.read_base));
+                     } else {
+                        single_read_redd_data.X.back().push_back({feature.mean,feature.stdev,(float)feature.length,feature.skewness,feature.kurtosis});
+                        single_read_redd_data.y_ref.back().push_back(get_encoding(feature.ref_base));
+                        single_read_redd_data.y_call.back().push_back(get_encoding(feature.read_base));
+
+                     }
+
                 };
-                read_data_point_vec.push_back(data_point_vec);
-                // sprintf_append(sp, "==========================================================");
-                // sprintf_append(sp, "\n");
-                // double X_data[2][4] = { {1.2, 2.3, 3.4, 4.5},
-                //              {5.6, 6.7, 7.8, 8.9}};
-                // append_to_dataset(dset_X,     H5T_NATIVE_DOUBLE, 2, 4, X_data);
 
 
             }
@@ -2462,12 +2440,8 @@ std::vector<std::vector<redd_data_point_t>> emit_event_alignment_tsv_redd(uint32
 
 
     }
-    // fprintf(stderr, "%d\n", read_data_point_vec.size());
-    // fprintf(stderr, "%.3f\n", read_data_point_vec[0][4].X[0]);
-    // *num_data_points = read_data_point_vec.size();
-    // fprintf(stderr, "%.3f\n", read_data_point_vec[0][0].X[0]);
-    // fprintf(stderr, "%.3f\n", read_data_point_vec.data()[0][0].X[0]);
-    return read_data_point_vec;
+
+    return single_read_redd_data;
 
 
     //str_free(sp); //freeing is later done in free_db_tmp()

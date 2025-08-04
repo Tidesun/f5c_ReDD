@@ -46,42 +46,38 @@ inline void init_redd_candidate_ratio_map(core_t* core){
 inline void init_redd_hdf5_file(core_t* core,std::string output_file){
     std::remove(output_file.c_str());
     HighFive::File file(output_file, HighFive::File::ReadWrite | HighFive::File::Create);
-    HighFive::DataSetAccessProps cacheConfig;
-    cacheConfig.add(HighFive::Caching(58193, 1024*1024*1024, 1.0));
+    // HighFive::DataSetAccessProps cacheConfig;
+    // cacheConfig.add(HighFive::Caching(58193, 1024*1024*1024, 1.0));
 
     HighFive::DataSetCreateProps X_props;
     X_props.add(HighFive::Chunking({10240,core->opt.redd_window_size,5}));
-    X_props.add(HighFive::Deflate(9));
+    // X_props.add(HighFive::Deflate(9));
     HighFive::DataSetCreateProps y_props;
     y_props.add(HighFive::Chunking({10240,core->opt.redd_window_size}));
-    y_props.add(HighFive::Deflate(9));
+    // y_props.add(HighFive::Deflate(9));
     HighFive::DataSetCreateProps info_props;
     info_props.add(HighFive::Chunking({10240}));
-    info_props.add(HighFive::Deflate(9));
+    // info_props.add(HighFive::Deflate(9));
     // Create a dataset with an unlimited dimension for appending
     file.createDataSet<float>(
         "/X",
         HighFive::DataSpace({0,core->opt.redd_window_size,5}, {HighFive::DataSpace::UNLIMITED,core->opt.redd_window_size,5}), // Initial size 10, unlimited max
-        X_props, // Chunking required for extendable datasets
-        cacheConfig
+        X_props // Chunking required for extendable datasets
     );
     file.createDataSet<uint32_t>(
         "/y_ref",
         HighFive::DataSpace({0,core->opt.redd_window_size}, {HighFive::DataSpace::UNLIMITED,core->opt.redd_window_size}), // Initial size 10, unlimited max
-        y_props, // Chunking required for extendable datasets
-        cacheConfig
+        y_props // Chunking required for extendable datasets
     );
     file.createDataSet<uint32_t>(
         "/y_call",
         HighFive::DataSpace({0,core->opt.redd_window_size}, {HighFive::DataSpace::UNLIMITED,core->opt.redd_window_size}), // Initial size 10, unlimited max
-        y_props, // Chunking required for extendable datasets
-        cacheConfig
+        y_props // Chunking required for extendable datasets
     );
     file.createDataSet<std::string>(
         "/info",
         HighFive::DataSpace({0}, {HighFive::DataSpace::UNLIMITED}), // Initial size 10, unlimited max
-        info_props, // Chunking required for extendable datasets
-        cacheConfig
+        info_props // Chunking required for extendable datasets
     );
 };
 inline void append_arr_to_dataset(core_t* core,std::string output_file,
