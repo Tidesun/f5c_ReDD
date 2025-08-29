@@ -580,6 +580,8 @@ void align_single(core_t* core, db_t* db, int32_t i);
 
 /* write the output for a processed data batch */
 void output_db(core_t* core, db_t* db);
+void output_db_redd(core_t* core, db_t* db);
+void output_db_eventalign(core_t* core, db_t* db);
 
 /* partially free a data batch - only the read dependent allocations are freed */
 void free_db_tmp(db_t* db);

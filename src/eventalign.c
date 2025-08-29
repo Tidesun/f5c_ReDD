@@ -2058,13 +2058,17 @@ float get_median_mad_pa(float* arr, int64_t size) {
     delete[] deviations;
     return mad_value;
 }
-std::vector<float> get_scaled_samples_redd(float *samples, uint64_t start_idx, uint64_t end_idx, scalings_t scaling,float raw_signal_median,float raw_signal_mad){
+void rescale_pa(float* arr, int64_t size,scalings_t scaling){
+    for (size_t i = 0; i < size; ++i){
+        arr[i] = arr[i] - scaling.shift;
+        arr[i] /= scaling.scale;
+    }
+}
+std::vector<float> get_scaled_samples_redd(float *samples, uint64_t start_idx, uint64_t end_idx, float raw_signal_median,float raw_signal_mad){
     std::vector<float> out;
     for(uint64_t i = start_idx; i < end_idx; ++i) {
         double s = samples[i];
-        double scaled_s = s - scaling.shift;
-        scaled_s /= scaling.scale;
-        scaled_s -= raw_signal_median;
+        double scaled_s = s -  raw_signal_median;
         scaled_s /= raw_signal_mad;
         if (scaled_s < -5.0){
             scaled_s = -5.0;
@@ -2083,7 +2087,8 @@ void get_raw_signals_feature(const std::vector<float>& data,float& mean, size_t&
     float& stdev, float& skewness, float& kurtosis) {
     length = data.size();
     if (length == 0) {
-        mean = stdev = skewness = kurtosis = std::numeric_limits<float>::quiet_NaN();
+        // mean = stdev = skewness = kurtosis = std::numeric_limits<float>::quiet_NaN();
+        mean = stdev = skewness = kurtosis = 0;
         return;
     }
     // Step 1: Compute mean
@@ -2111,7 +2116,7 @@ void get_raw_signals_feature(const std::vector<float>& data,float& mean, size_t&
             (length * m3) / ((length - 1) * (length - 2) * std::pow(stdev, 3))
         );
     } else {
-        skewness = std::numeric_limits<float>::quiet_NaN();
+        skewness = 0;
     }
 
     if(length > 3 && stdev > 0) {
@@ -2121,7 +2126,7 @@ void get_raw_signals_feature(const std::vector<float>& data,float& mean, size_t&
                     / (denom * std::pow(stdev, 4));
         kurtosis = static_cast<float>(g2);
     } else {
-        kurtosis = std::numeric_limits<float>::quiet_NaN();
+        kurtosis = 0;
     }
 
 }
@@ -2314,6 +2319,7 @@ redd_data_t emit_event_alignment_tsv_redd(uint32_t strand_idx,
 {
     redd_data_t single_read_redd_data;
     int half_redd_window_size = redd_window_size/2;
+    rescale_pa(rawptr,len_raw_signal,scalings);
     float raw_signal_median = get_median_pa(rawptr,len_raw_signal);
     float raw_signal_mad = get_median_mad_pa(rawptr,len_raw_signal);
 
@@ -2341,13 +2347,13 @@ redd_data_t emit_event_alignment_tsv_redd(uint32_t strand_idx,
             uint64_t start_idx = (et->event)[ea.event_idx].start; //inclusive
             uint64_t end_idx = (et->event)[ea.event_idx].start + (uint64_t)((et->event)[ea.event_idx].length); //non-inclusive
 
-            std::vector<float> samples = get_scaled_samples_redd(rawptr, start_idx, end_idx, scalings,raw_signal_median,raw_signal_mad);
+            std::vector<float> samples = get_scaled_samples_redd(rawptr, start_idx, end_idx,raw_signal_median,raw_signal_mad);
             n_collapse = 1;
             while (i + n_collapse < alignments.size() && ea.ref_position ==  alignments[i+n_collapse].ref_position){
                 const event_alignment_t& new_ea = alignments[i+n_collapse];
                 uint64_t new_start_idx = (et->event)[new_ea.event_idx].start; //inclusive
                 uint64_t new_end_idx = (et->event)[new_ea.event_idx].start + (uint64_t)((et->event)[new_ea.event_idx].length); //non-inclusive
-                std::vector<float> new_samples = get_scaled_samples_redd(rawptr, new_start_idx, new_end_idx, scalings,raw_signal_median,raw_signal_mad);
+                std::vector<float> new_samples = get_scaled_samples_redd(rawptr, new_start_idx, new_end_idx,raw_signal_median,raw_signal_mad);
                 samples.insert(samples.end(), new_samples.begin(), new_samples.end());
                 // if(strcmp(ea.model_kmer,alignments[i+n_collapse].model_kmer)!=0){ //TODO: NNNN kmers must be handled
                 //     fprintf(stderr, "model kmer does not match! %s vs %s\n",ea.model_kmer,alignments[i+n_collapse].model_kmer);
