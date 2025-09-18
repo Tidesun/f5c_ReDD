@@ -2317,7 +2317,11 @@ redd_data_t emit_event_alignment_tsv_redd(uint32_t strand_idx,
                               int8_t print_read_names, int8_t scale_events, int8_t write_samples, int8_t write_signal_index, int8_t collapse,
                               int64_t read_index, char* read_name, char *ref_name,float sample_rate, float *rawptr,int64_t len_raw_signal,int64_t redd_window_size,std::unordered_map<std::string, std::unordered_map<u_int64_t, float>> redd_candidate_ratio_map)
 {
+
     redd_data_t single_read_redd_data;
+    if (alignments.size() == 0){
+        return single_read_redd_data;
+    }
     int half_redd_window_size = redd_window_size/2;
     rescale_pa(rawptr,len_raw_signal,scalings);
     float raw_signal_median = get_median_pa(rawptr,len_raw_signal);
