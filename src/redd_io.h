@@ -4,6 +4,7 @@
 #include <highfive/H5File.hpp>
 
 #include "f5c.h"
+#include "hdf5.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -11,6 +12,21 @@
 #include <string>
 #include <cstdio>
 #include <unordered_map>
+#include <H5Ppublic.h>
+constexpr unsigned int LZ4_FILTER_ID = 32004;
+
+inline void set_lz4_filter(HighFive::DataSetCreateProps& props) {
+    herr_t status = H5Pset_filter(
+        props.getId(),
+        (H5Z_filter_t)32004,
+        H5Z_FLAG_MANDATORY,
+        0,
+        nullptr
+    );
+    if (status < 0) {
+        std::cerr << "Failed to set LZ4 filter!" << std::endl;
+    }
+}
 
 inline void init_redd_candidate_ratio_map(core_t* core){
     core->redd_candidate_ratio_map = std::unordered_map<std::string, std::unordered_map<u_int64_t, float>>();
@@ -50,13 +66,16 @@ inline void init_redd_hdf5_file(core_t* core,std::string output_file){
     // cacheConfig.add(HighFive::Caching(58193, 1024*1024*1024, 1.0));
 
     HighFive::DataSetCreateProps X_props;
-    X_props.add(HighFive::Chunking({10240,core->opt.redd_window_size,5}));
+    X_props.add(HighFive::Chunking({1000,core->opt.redd_window_size,5}));
+    set_lz4_filter(X_props);
     // X_props.add(HighFive::Deflate(9));
     HighFive::DataSetCreateProps y_props;
-    y_props.add(HighFive::Chunking({10240,core->opt.redd_window_size}));
+    y_props.add(HighFive::Chunking({1000,core->opt.redd_window_size}));
+    set_lz4_filter(y_props);
     // y_props.add(HighFive::Deflate(9));
     HighFive::DataSetCreateProps info_props;
-    info_props.add(HighFive::Chunking({10240}));
+    info_props.add(HighFive::Chunking({1000}));
+    set_lz4_filter(info_props);
     // info_props.add(HighFive::Deflate(9));
     // Create a dataset with an unlimited dimension for appending
     file.createDataSet<float>(
